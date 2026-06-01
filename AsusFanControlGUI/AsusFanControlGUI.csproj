@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <RootNamespace>AsusFanControlGUI</RootNamespace>
+    <!-- Preserving the icon from the old file -->
+    <ApplicationIcon>propeller.ico</ApplicationIcon>
+    <!-- FIX: Disable auto-generation to prevent duplicate errors -->
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Link to the logic project -->
+    <ProjectReference Include="..\AsusFanControl\AsusFanControl.csproj" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <!-- Automatically download the Chart control for .NET 7 -->
+    <PackageReference Include="System.Data.SqlClient" Version="4.9.0" />
+    <PackageReference Include="System.Management" Version="10.0.8" />
+    <PackageReference Include="System.Windows.Forms.DataVisualization" Version="1.0.0-prerelease.20110.1" />
+  </ItemGroup>
+
+</Project>
