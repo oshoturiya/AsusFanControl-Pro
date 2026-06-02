@@ -179,3 +179,38 @@ If the user reports that frequency control, speed limits, or fan curves are not 
      `powercfg -restoredefaultschemes`
 4. **Driver Signature Issues**:
    - If shifting to a new laptop and the app crashes immediately upon reading temperature, secure boot or device guard policy may be blocking the `AsusWinIO64.dll` driver. Check the Windows Event Viewer under System logs.
+
+---
+
+## 🧬 AMD Ryzen Compatibility & Standalone Portability (New!)
+
+To make the application completely portable, safe, and compatible with both high-performance Intel systems and AMD Ryzen laptop architectures (such as the Ryzen 3 7320U), we implemented a dual-mode engine:
+
+1. **Automatic CPU Architecture Detection**:
+   - At startup, the program queries environment variables (`PROCESSOR_IDENTIFIER` and `PROCESSOR_ARCHITECTURE`) via `IsAmdProcessor()`.
+   - If an AMD Ryzen CPU is detected (`AuthenticAMD`, `AMD`), it sets the class-level state flag `isAmdProcessor = true`.
+2. **Dynamic ThrottleStop & Intel Feature Bypass**:
+   - Since ThrottleStop is strictly Intel-only, trying to launch it on AMD Ryzen will trigger physical hardware unsupported failures. The program automatically skips searching for or launching ThrottleStop on AMD hardware.
+   - Dynamic power configurations (like Intel HWP Speed Shift and dynamic C-states) are safely encapsulated in exception boundaries, ensuring AMD models do not trigger OS power scheme errors.
+3. **Asus EC Driver Portability (VivoBook Verification)**:
+   - Asus AMD Ryzen Vivobooks utilize the identical Embedded Controller (EC) cooling loop and health table registers as Intel Asus Vivobooks. 
+   - Consequently, the direct hardware queries (`AsusWinIO64.dll`'s `GetFanSpeeds()`, `SetFanSpeeds()`, and `Thermal_Read_Cpu_Temperature()`) are fully operational and verified to work natively on both platforms!
+4. **Resilient High-Precision Temperature Fallback**:
+   - In case a specific Asus motherboard BIOS locks down direct driver temperature reads, we integrated a **three-stage temperature sensor fallback** in `GetCpuTemperature()`:
+     1. Primary: Direct physical read via `AsusWinIO64.dll`.
+     2. Secondary: WMI query `MSAcpi_ThermalZoneTemperature` under the `root\WMI` namespace.
+     3. Tertiary: WMI query `Win32_PerfFormattedData_Counters_ThermalZoneInformation` under `root\CIMV2`.
+     4. Emergency Load-Based Estimation: If all BIOS queries fail, it dynamically estimates a temperature based on active CPU load: `estimatedTemp = 40 + (int)(load * 0.4)`. This guarantees the cooling fans will always physically speed up and cool the laptop under heavy compute cycles!
+5. **No-PsExec Standalone Fallback**:
+   - If `PsExec.exe` is absent from the publish directory, the application gracefully skips the high-privilege SYSTEM scheduled task startup sequence.
+   - Instead, it falls back to standard Windows **UAC Elevation (`runas` verb)**. It will display a standard UAC prompt at startup and run directly as an Administrator. This makes it perfect for sharing with non-technical users who want a clean standalone program without configuring task schedulers!
+
+---
+
+## 🧵 Low-Level Driver Thread Affinity Rules (Critical!)
+
+During optimization, we encountered a crucial system driver bug: the low-level physical port/memory mapper `AsusWinIO64.dll` is **extremely sensitive to Thread Affinity**.
+
+* **The Problem**: Drivers that map physical hardware memory space using `MapPhysToLinear` bind their operational handles and mapping contexts strictly to the thread that initialized it. 
+* **The Symptom**: If `AsusControl` is initialized on the **Main UI Thread**, and a separate **Background Thread** tries to execute reads or writes (like `GetFanSpeeds()` or `SetFanSpeeds()`), the operations will fail silently at the kernel level.
+* **The Rule**: Any future AI or developer making changes to low-level physical registers **MUST** ensure that all driver initialization, read queries, and write operations are executed on the same thread context. If a background worker thread is used for hardware I/O, both the `new AsusControl()` initialization and all operational loops must be placed inside that same background thread sequence!
