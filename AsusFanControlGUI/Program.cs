@@ -22,21 +22,59 @@ namespace AsusFanControlGUI
                 return;
             }
 
-            // 1. Check if we are running as SYSTEM
-            if (IsRunningAsSystem())
+            // 1. First, ensure we are running as Administrator (either standard Admin or SYSTEM)
+            if (!IsUserAnAdministrator() && !IsRunningAsSystem())
             {
-                Application.Run(new Form1());
+                // Request standard UAC elevation
+                try
+                {
+                    string currentExe = Process.GetCurrentProcess().MainModule.FileName;
+                    ProcessStartInfo uacPsi = new ProcessStartInfo
+                    {
+                        FileName = currentExe,
+                        UseShellExecute = true,
+                        Verb = "runas" // Standard UAC prompt!
+                    };
+                    Process.Start(uacPsi);
+                    Application.Exit();
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("This application must be run as Administrator to control fans and power limits.\n\nError: " + ex.Message, "Elevation Required", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+            }
+
+            // 2. We are Administrator. Check if PsExec is present in folder
+            string currentFolder = Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName);
+            string psexecPath = Path.Combine(currentFolder, "PsExec.exe");
+            if (!File.Exists(psexecPath))
+            {
+                psexecPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PsExec.exe");
+            }
+
+            // 3. If PsExec is present, we follow the UAC-Bypass / SYSTEM path
+            if (File.Exists(psexecPath))
+            {
+                if (IsRunningAsSystem())
+                {
+                    Application.Run(new Form1());
+                }
+                else
+                {
+                    // Self-healing scheduled task and desktop shortcut (UAC-Bypass)
+                    HealScheduledTaskAndShortcut();
+                    
+                    // Relaunch as SYSTEM using PsExec
+                    AttemptRelaunchAsSystem(psexecPath);
+                }
             }
             else
             {
-                // Verify scheduled task and shortcut registration (Self-Healing)
-                if (IsUserAnAdministrator())
-                {
-                    HealScheduledTaskAndShortcut();
-                }
-
-                // 2. Not System? Try to elevate
-                AttemptRelaunchAsSystem();
+                // 4. Standalone/UAC Edition (PsExec missing)
+                // We are already elevated as Administrator. Run directly!
+                Application.Run(new Form1());
             }
         }
 
@@ -48,38 +86,9 @@ namespace AsusFanControlGUI
             }
         }
 
-        static void AttemptRelaunchAsSystem()
+        static void AttemptRelaunchAsSystem(string psexecPath)
         {
-            // Get the true location of the running .exe
             string currentExe = Process.GetCurrentProcess().MainModule.FileName;
-            string currentFolder = Path.GetDirectoryName(currentExe);
-            
-            // Define where we look for PsExec
-            string[] possiblePaths = {
-                Path.Combine(currentFolder, "PsExec.exe"),                          // Same folder as EXE
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PsExec.exe"),  // App Base Directory
-                Path.Combine(currentFolder, "..", "..", "..", "..", "PsExec.exe")   // Project Root (Debugging)
-            };
-
-            string psexecPath = null;
-            foreach (var path in possiblePaths)
-            {
-                if (File.Exists(path))
-                {
-                    psexecPath = path;
-                    break;
-                }
-            }
-
-            if (psexecPath == null)
-            {
-                MessageBox.Show($"PsExec.exe was not found.\n\nSearched in:\n{currentFolder}", 
-                                "Missing Dependency", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                // Run anyway as Admin (fallback)
-                Application.Run(new Form1());
-                return;
-            }
-
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo();

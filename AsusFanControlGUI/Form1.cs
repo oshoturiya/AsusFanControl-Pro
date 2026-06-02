@@ -120,6 +120,7 @@ namespace AsusFanControlGUI
 
         // --- ThrottleStop Integration ---
         private System.Diagnostics.Process throttleStopProcess = null;
+        private bool isAmdProcessor = false;
 
 
         // --- Win32 Power API P/Invoke Declarations ---
@@ -158,6 +159,7 @@ namespace AsusFanControlGUI
 
         public Form1()
         {
+            isAmdProcessor = IsAmdProcessor();
             InitializeComponent();
             InitializeFanDriver();
             InitializeCpuCounter();
@@ -170,6 +172,7 @@ namespace AsusFanControlGUI
 
         private void LaunchThrottleStopIfPresent()
         {
+            if (isAmdProcessor) return; // Skip completely on AMD Ryzen!
             try
             {
                 string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -229,6 +232,21 @@ namespace AsusFanControlGUI
                 }
             }
             catch { }
+        }
+
+        private bool IsAmdProcessor()
+        {
+            try
+            {
+                string procId = System.Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER") ?? "";
+                string procArch = System.Environment.GetEnvironmentVariable("PROCESSOR_ARCHITECTURE") ?? "";
+                if (procId.Contains("AuthenticAMD") || procId.Contains("AMD") || procArch.Contains("AMD"))
+                {
+                    return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
 
