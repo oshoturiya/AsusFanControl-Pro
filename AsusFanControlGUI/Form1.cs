@@ -953,22 +953,60 @@ namespace AsusFanControlGUI
 
                 if (enable)
                 {
-                    string escapedExePath = exePath.Replace("'", "''");
-                    string escapedExeDir = exeDir.Replace("'", "''");
-
-                    string registerCmd = $"$action = New-ScheduledTaskAction -Execute '{escapedExePath}' -WorkingDirectory '{escapedExeDir}'; $trigger = New-ScheduledTaskTrigger -AtLogOn; $principal = New-ScheduledTaskPrincipal -RunLevel Highest; Register-ScheduledTask -TaskName '{taskName}' -Action $action -Trigger $trigger -Principal $principal -Force";
+                    string tempXmlPath = Path.Combine(exeDir, "task_heal_temp.xml");
+                    string xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
+<Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
+  <RegistrationInfo>
+    <URI>\{taskName}</URI>
+  </RegistrationInfo>
+  <Principals>
+    <Principal id=""Author"">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <IdleSettings>
+      <Duration>PT10M</Duration>
+      <WaitTimeout>PT1H</WaitTimeout>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+  </Settings>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Actions Context=""Author"">
+    <Exec>
+      <Command>""{exePath}""</Command>
+      <WorkingDirectory>{exeDir}</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>";
+                    File.WriteAllText(tempXmlPath, xmlContent, System.Text.Encoding.Unicode);
 
                     System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
                     {
-                        FileName = "powershell.exe",
-                        Arguments = $"-WindowStyle Hidden -Command \"{registerCmd}\"",
+                        FileName = "schtasks.exe",
+                        Arguments = $"/create /tn \"{taskName}\" /xml \"{tempXmlPath}\" /f",
                         UseShellExecute = false,
                         CreateNoWindow = true
                     };
                     using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
                     {
-                        process.WaitForExit();
+                        if (process != null)
+                        {
+                            process.WaitForExit(3000);
+                            if (!process.HasExited) { try { process.Kill(); } catch { } }
+                        }
                     }
+
+                    try { File.Delete(tempXmlPath); } catch { }
                 }
                 else
                 {
@@ -981,7 +1019,11 @@ namespace AsusFanControlGUI
                     };
                     using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
                     {
-                        process.WaitForExit();
+                        if (process != null)
+                        {
+                            process.WaitForExit(3000);
+                            if (!process.HasExited) { try { process.Kill(); } catch { } }
+                        }
                     }
                 }
 
@@ -1023,7 +1065,11 @@ namespace AsusFanControlGUI
                 };
                 using (var p = System.Diagnostics.Process.Start(startInfo))
                 {
-                    p.WaitForExit();
+                    if (p != null)
+                    {
+                        p.WaitForExit(3000);
+                        if (!p.HasExited) { try { p.Kill(); } catch { } }
+                    }
                 }
             }
             catch { }
@@ -1044,14 +1090,16 @@ namespace AsusFanControlGUI
                 };
                 using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
                 {
-                    process.WaitForExit();
-                    return process.ExitCode == 0;
+                    if (process != null)
+                    {
+                        process.WaitForExit(3000);
+                        if (!process.HasExited) { try { process.Kill(); } catch { } }
+                        return process.ExitCode == 0;
+                    }
                 }
             }
-            catch
-            {
-                return false;
-            }
+            catch { }
+            return false;
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
