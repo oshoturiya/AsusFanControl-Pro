@@ -249,48 +249,9 @@ namespace AsusFanControlGUI
             return false;
         }
 
-        private int lastAppliedThermalPolicy = -1;
-
-        private void SetAsusWmiThermalPolicy(int policy)
-        {
-            if (lastAppliedThermalPolicy == policy) return;
-            try
-            {
-                var scope = new System.Management.ManagementScope(@"\\.\root\wmi");
-                scope.Connect();
-                using (var searcher = new System.Management.ManagementObjectSearcher(scope, new System.Management.ObjectQuery("SELECT * FROM AsusAtkWmi_WMNB")))
-                {
-                    foreach (System.Management.ManagementObject obj in searcher.Get())
-                    {
-                        obj.InvokeMethod("DEVS", new object[] { 0x00110019, (uint)policy });
-                        lastAppliedThermalPolicy = policy;
-                        break;
-                    }
-                }
-            }
-            catch
-            {
-                try
-                {
-                    var scope = new System.Management.ManagementScope(@"\\.\root\wmi");
-                    scope.Connect();
-                    using (var searcher = new System.Management.ManagementObjectSearcher(scope, new System.Management.ObjectQuery("SELECT * FROM AsusAtkWmi_WMNB")))
-                    {
-                        foreach (System.Management.ManagementObject obj in searcher.Get())
-                        {
-                            obj.InvokeMethod("DEVS", new object[] { 0x00120075, (uint)policy });
-                            lastAppliedThermalPolicy = policy;
-                            break;
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
-
         private int GetCpuTemperature()
         {
-            if (asusControl != null && !isAmdProcessor)
+            if (asusControl != null)
             {
                 try
                 {
@@ -705,33 +666,8 @@ namespace AsusFanControlGUI
                             try
                             {
                                 List<int> speeds = asusControl.GetFanSpeeds();
-                                string rpmText = "N/A";
-                                if (speeds.Count > 0)
-                                {
-                                    rpmText = $"{speeds[0]} RPM";
-                                    if (speeds.Count > 1) rpmText += $" / {speeds[1]} RPM";
-                                }
-                                else if (isAmdProcessor)
-                                {
-                                    // Simulated high-precision feedback based on the WMI policy mapped to current target speed
-                                    int currentTarget = targetFanSpeed;
-                                    if (currentTarget < 0)
-                                    {
-                                        rpmText = "2400 RPM (WMI Auto)";
-                                    }
-                                    else if (currentTarget < 35)
-                                    {
-                                        rpmText = $"{1200 + (currentTarget * 15)} RPM (WMI Silent)";
-                                    }
-                                    else if (currentTarget < 70)
-                                    {
-                                        rpmText = $"{2000 + ((currentTarget - 35) * 20)} RPM (WMI Standard)";
-                                    }
-                                    else
-                                    {
-                                        rpmText = $"{3200 + ((currentTarget - 70) * 35)} RPM (WMI Turbo)";
-                                    }
-                                }
+                                string rpmText = (speeds.Count > 0) ? $"{speeds[0]} RPM" : "N/A";
+                                if (speeds.Count > 1) rpmText += $" / {speeds[1]} RPM";
                                 rpm = rpmText;
                             }
                             catch { }
@@ -814,24 +750,7 @@ namespace AsusFanControlGUI
                     // Apply fan speed if changed
                     if (fanSpeedToApply != lastAppliedBgFanSpeed)
                     {
-                        if (isAmdProcessor)
-                        {
-                            // On AMD Ryzen Asus laptops, map fanSpeedToApply % directly to WMI Thermal Policies:
-                            // fanSpeedToApply == -1 -> Balanced (0)
-                            // fanSpeedToApply < 35 -> Silent (2)
-                            // fanSpeedToApply >= 35 && fanSpeedToApply < 70 -> Balanced (0)
-                            // fanSpeedToApply >= 70 -> Turbo / Performance (1)
-                            int policy = 0; // Standard / Balanced
-                            if (fanSpeedToApply >= 0)
-                            {
-                                if (fanSpeedToApply < 35) policy = 2; // Silent
-                                else if (fanSpeedToApply < 70) policy = 0; // Balanced
-                                else policy = 1; // Turbo
-                            }
-                            SetAsusWmiThermalPolicy(policy);
-                            lastAppliedBgFanSpeed = fanSpeedToApply;
-                        }
-                        else if (asusControl != null)
+                        if (asusControl != null)
                         {
                             try
                             {
@@ -1144,11 +1063,7 @@ namespace AsusFanControlGUI
             }
 
             SaveSettings(); 
-            if (isAmdProcessor)
-            {
-                try { SetAsusWmiThermalPolicy(0); } catch { }
-            }
-            else if (asusControl != null)
+            if (asusControl != null)
             {
                 try { asusControl.SetFanSpeeds(0); } catch { }
             }
