@@ -78,8 +78,11 @@ namespace AsusFanControlGUI
         private string settingsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.txt");
         private bool safetyEnabled = true;
         private int safetyTriggerTemp = 90;
-        private bool safetyActionIsBios = true; 
+        private bool safetyActionIsBios = true;
         private bool runAtStartup = false;
+        // AI Context: Tracks the exact time the application started. Used to apply a 60-second grace period 
+        // during boot/logon to prevent applying any CPU frequency caps before Windows completely loads.
+        private DateTime appStartupTime = DateTime.UtcNow;
 
         // --- Frequency Controller Variables ---
         private System.Diagnostics.PerformanceCounter cpuCounter;
@@ -590,9 +593,13 @@ namespace AsusFanControlGUI
 
                 int freqVal    = isMax ? 0 : mhz;                    // PROCFREQMAX: 0 = unlimited
                 int maxState   = 100;                                  // PROCTHROTTLEMAX: always 100%
-                int minState   = isMax ? 100 : 5;                     // PROCTHROTTLEMIN: 100% max perf, 5% when limited
+                // AI Context: Raising minState to 35% (instead of 5%) prevents the CPU from locking itself at the
+                // absolute hardware floor of 0.4 GHz (400 MHz) when CPU loads are low under limited performance modes.
+                int minState   = isMax ? 100 : 35;                     // PROCTHROTTLEMIN: 100% max perf, 35% when limited
                 int boostMode  = isMax ? 2 : 0;                       // PERFBOOSTMODE: 2=Aggressive, 0=Off
-                int epp        = isMax ? 0 : 100;                     // PERFEPP: 0=max perf, 100=max save
+                // AI Context: Setting EPP to 50 (Balanced/Dynamic) instead of 100 (Max Power Saving) ensures
+                // the CPU responds dynamically to demand up to our limit, preventing lockups.
+                int epp        = isMax ? 0 : 50;                      // PERFEPP: 0=max perf, 50=balanced
                 int idleDisable = enableIdle ? 0 : 1;                 // IDLEDISABLE: 0=enabled, 1=disabled
 
                 string cmdLine = string.Join(" & ",
@@ -747,6 +754,15 @@ namespace AsusFanControlGUI
                         cStatesToApply = enableCStates;
                     }
 
+                    // Startup grace period: bypass limits during first 60 seconds
+                    // AI Context: This ensures explorer.exe and other heavy startup tasks finish loading
+                    // without any CPU throttling, avoiding system lockups at boot.
+                    if ((DateTime.UtcNow - appStartupTime).TotalSeconds < 60)
+                    {
+                        freqToApply = 0; // Unlimited / Max performance mode
+                        cStatesToApply = true; // Default/Normal idle behavior
+                    }
+
                     // Apply fan speed if changed
                     if (fanSpeedToApply != lastAppliedBgFanSpeed)
                     {
@@ -884,7 +900,13 @@ namespace AsusFanControlGUI
                 }
 
                 // Update CPU Limit label
-                if (freqControlEnabled)
+                double secondsSinceStart = (DateTime.UtcNow - appStartupTime).TotalSeconds;
+                if (secondsSinceStart < 60)
+                {
+                    // AI Context: Show visual feedback to the user so they know safety grace is active.
+                    lblCpuLimit.Text = $"Limit: Startup Grace ({60 - (int)secondsSinceStart}s)";
+                }
+                else if (freqControlEnabled)
                 {
                     lblCpuLimit.Text = (targetLimit >= 4.1) ? "Limit: Max (4.10 GHz)" : $"Limit: {targetLimit:F2} GHz";
                 }
@@ -951,10 +973,8 @@ namespace AsusFanControlGUI
                 string exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
                 string exeDir = Path.GetDirectoryName(exePath);
 
-                if (enable)
-                {
-                    string tempXmlPath = Path.Combine(exeDir, "task_heal_temp.xml");
-                    string xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
+                string tempXmlPath = Path.Combine(exeDir, "task_heal_temp.xml");
+                string xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
 <Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
   <RegistrationInfo>
     <URI>\{taskName}</URI>
@@ -978,7 +998,7 @@ namespace AsusFanControlGUI
   </Settings>
   <Triggers>
     <LogonTrigger>
-      <Enabled>true</Enabled>
+      <Enabled>{(enable ? "true" : "false")}</Enabled>
     </LogonTrigger>
   </Triggers>
   <Actions Context=""Author"">
@@ -988,44 +1008,25 @@ namespace AsusFanControlGUI
     </Exec>
   </Actions>
 </Task>";
-                    File.WriteAllText(tempXmlPath, xmlContent, System.Text.Encoding.Unicode);
+                File.WriteAllText(tempXmlPath, xmlContent, System.Text.Encoding.Unicode);
 
-                    System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = "schtasks.exe",
-                        Arguments = $"/create /tn \"{taskName}\" /xml \"{tempXmlPath}\" /f",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
-                    {
-                        if (process != null)
-                        {
-                            process.WaitForExit(3000);
-                            if (!process.HasExited) { try { process.Kill(); } catch { } }
-                        }
-                    }
-
-                    try { File.Delete(tempXmlPath); } catch { }
-                }
-                else
+                System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
                 {
-                    System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
+                    FileName = "schtasks.exe",
+                    Arguments = $"/create /tn \"{taskName}\" /xml \"{tempXmlPath}\" /f",
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+                using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
+                {
+                    if (process != null)
                     {
-                        FileName = "schtasks.exe",
-                        Arguments = $"/delete /tn \"{taskName}\" /f",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
-                    {
-                        if (process != null)
-                        {
-                            process.WaitForExit(3000);
-                            if (!process.HasExited) { try { process.Kill(); } catch { } }
-                        }
+                        process.WaitForExit(3000);
+                        if (!process.HasExited) { try { process.Kill(); } catch { } }
                     }
                 }
+
+                try { File.Delete(tempXmlPath); } catch { }
 
                 // Update Desktop shortcut to point directly to the EXE!
                 UpdateDesktopShortcut();
@@ -1095,6 +1096,56 @@ namespace AsusFanControlGUI
                         process.WaitForExit(3000);
                         if (!process.HasExited) { try { process.Kill(); } catch { } }
                         return process.ExitCode == 0;
+                    }
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private bool IsTaskTriggerEnabled(string taskName)
+        {
+            try
+            {
+                System.Diagnostics.ProcessStartInfo startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "schtasks.exe",
+                    Arguments = $"/query /xml /tn \"{taskName}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(startInfo))
+                {
+                    if (process != null)
+                    {
+                        string xmlOut = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit(3000);
+                        if (!process.HasExited) { try { process.Kill(); } catch { } }
+                        
+                        if (process.ExitCode == 0)
+                        {
+                            // A logon trigger is enabled by default unless explicitly disabled with <Enabled>false</Enabled>.
+                            // AI Context: Standard tools like 'schtasks.exe /create' create '<LogonTrigger />' without
+                            // an internal '<Enabled>true</Enabled>' tag. We must recognize this shorthand as ENABLED.
+                            if (xmlOut.Contains("<LogonTrigger />") || xmlOut.Contains("<LogonTrigger/>"))
+                            {
+                                return true;
+                            }
+                            int logonIdx = xmlOut.IndexOf("<LogonTrigger>");
+                            if (logonIdx >= 0)
+                            {
+                                int logonEndIdx = xmlOut.IndexOf("</LogonTrigger>", logonIdx);
+                                if (logonEndIdx > logonIdx)
+                                {
+                                    string triggerXml = xmlOut.Substring(logonIdx, logonEndIdx - logonIdx);
+                                    // If task is explicitly disabled via UI setting it will contain <Enabled>false</Enabled>
+                                    return !triggerXml.Contains("<Enabled>false</Enabled>");
+                                }
+                                return true;
+                            }
+                        }
                     }
                 }
             }
@@ -1177,7 +1228,7 @@ namespace AsusFanControlGUI
                         }
 
                         // Check Task Scheduler for actual startup status to sync UI
-                        bool registryRun = IsTaskRegistered("AsusFanControlProStartup");
+                        bool registryRun = IsTaskTriggerEnabled("AsusFanControlProStartup");
 
                         runAtStartup = registryRun;
                         chkRunAtStartup.Checked = registryRun;

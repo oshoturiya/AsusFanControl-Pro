@@ -62,6 +62,14 @@ A major issue arose where Task Manager reported `4.07 GHz` but Core Temp showed 
 * **Cause**: When idle states (C-states) are active, Windows core-parks or sleeps CPU execution pipelines during idle cycles. Core Temp calculates the "Effective Clock" based on actual executed cycles divided by wall time, reflecting the sleep periods, while Task Manager reports the target hardware multiplier.
 * **Solution**: By setting **IDLEDISABLE = 1** (C-states disabled) across both Max and Hard Cap modes, the CPU pipelines never enter sleep states. The **Effective Clock immediately locked 1:1 to the actual target speed**, providing rock-solid, latency-free gaming frame rates and high computation speeds.
 
+### 🛡️ Startup Safety & Throttling Prevention (Added June 2026)
+
+When the application is registered to run on Windows Startup (`schtasks`), dynamic frequency controls could immediately lock the CPU to its lowest configured frequencies. On certain modern Intel architectures, setting `PERFEPP` to `100` (Max Power Saving) combined with `PROCTHROTTLEMIN` at `5%` caused the processor to aggressively lock down to its absolute hardware floor of **0.4 GHz (400 MHz)**. This makes Windows boot cycles painfully slow and crashes the user shell (`explorer.exe`).
+
+We implemented two primary architectural guards:
+1. **60-Second Startup Grace Period**: Inside [Form1.cs](file:///C:/Users/saksh/OneDrive/Documents/AsusFanControl-master/AsusFanControlGUI/Form1.cs), we track `appStartupTime`. For the first 60 seconds of the program's lifecycle, the background thread overrides all frequency limit targets to `0` (Max performance / Unlimited) and keeps C-states active. The UI reflects this with `Limit: Startup Grace (Xs)`. This allows Windows to fully boot, initialize core services, and launch the user desktop at full speed.
+2. **Safe Throttling Floors**: In limited modes (when `mhz > 0`), we raised `minState` from `5` to `35` and set `epp` to `50` (Balanced/Dynamic) instead of `100`. This ensures that even when dynamic sync downclocks the CPU under low load, it stays at a safe, responsive clock speed (typically >= 1.0 GHz to 1.4 GHz depending on nominal base clock) and responds dynamically to demand up to our set limit.
+
 ---
 
 ## ⚙️ ThrottleStop Wrapper Integration

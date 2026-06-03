@@ -32,6 +32,16 @@ We solved the dragging delay, CPU throttling, and Windows UAC prompts by complet
     - **Icon**: Extracted directly from the native C# executable, preserving the beautiful propeller icon.
     - **Benefit**: Double-clicking the Desktop shortcut now launches the application with **full Administrator privileges instantly, with absolutely NO UAC prompt!**
 
+### 5. Startup CPU Throttling Grace Period & Safety Floors (Added June 2026)
+- **The Issue**: When the application runs at Windows startup, dynamic frequency controls would immediately apply caps during boot/logon. Under certain hardware configurations, setting EPP to `100` (Max Power Saving) and `PROCTHROTTLEMIN` to `5%` throttled the CPU to its absolute minimum clock speed of **0.4 GHz (400 MHz)**. This caused extreme startup lag and `explorer.exe` shell timeouts.
+- **The Solution**: 
+  - **60-Second Grace Period**: Added a startup grace period where CPU frequency limits are bypassed (kept at Max/Unlimited performance) and C-states are enabled for the first 60 seconds of the application lifecycle. The UI displays a countdown: `Limit: Startup Grace (Xs)`.
+  - **Safety Floors**: In limited modes (when `mhz > 0`), we raised the minimum processor state (`minState`) from **5% to 35%** and adjusted Intel Speed Shift / HWP EPP from **100 (Max Power Saving) to 50 (Balanced)**. This keeps the processor responsive and prevents it from ever entering the 0.4 GHz throttle lock.
+
+### 6. Task Scheduler Trigger Sync Bug Fix (Added June 2026)
+- **The Issue**: Task Scheduler logon triggers created via command-line arguments can omit the `<Enabled>true</Enabled>` sub-node, defaulting to enabled in Windows. The app's XML parser previously only checked for `<Enabled>true</Enabled>`, displaying the "Run at Windows Startup" checkbox as unchecked in the UI despite the scheduled task being active.
+- **The Solution**: Updated `IsTaskTriggerEnabled` to recognize self-closing `<LogonTrigger />` tags and to default to `true` unless `<Enabled>false</Enabled>` is explicitly present, keeping the UI perfectly synchronized.
+
 ---
 
 ## 📦 Pristine Clean Repository

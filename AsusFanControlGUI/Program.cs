@@ -162,6 +162,21 @@ namespace AsusFanControlGUI
                 // Step 2. If task is not OK, register/update it
                 if (!taskOk)
                 {
+                    bool runOnStartupVal = false;
+                    try
+                    {
+                        string settingsPath = Path.Combine(currentDir, "settings.txt");
+                        if (File.Exists(settingsPath))
+                        {
+                            string[] lines = File.ReadAllLines(settingsPath);
+                            if (lines.Length > 6)
+                            {
+                                bool.TryParse(lines[6], out runOnStartupVal);
+                            }
+                        }
+                    }
+                    catch { }
+
                     string tempXmlPath = Path.Combine(currentDir, "task_heal_temp.xml");
                     string xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
 <Task version=""1.2"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
@@ -187,7 +202,7 @@ namespace AsusFanControlGUI
   </Settings>
   <Triggers>
     <LogonTrigger>
-      <Enabled>true</Enabled>
+      <Enabled>{(runOnStartupVal ? "true" : "false")}</Enabled>
     </LogonTrigger>
   </Triggers>
   <Actions Context=""Author"">
